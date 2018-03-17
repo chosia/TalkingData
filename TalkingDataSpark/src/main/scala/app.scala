@@ -11,7 +11,8 @@ object app {
   lazy val spark: SparkSession = {
     SparkSession
       .builder()
-      .master("local")
+      .master("yarn")
+      //.master("local")
       .appName("TalkingData")
       .getOrCreate()
   }
@@ -34,7 +35,8 @@ object app {
     val train  = spark.read
       .option("header", "true")
       .schema(trainSchema)
-      .csv("/Users/chosia/codersco/Projects/TalkingData/data/train_sample.csv")
+      //.csv("/Users/chosia/codersco/TalkingData/data/train_sample.csv")
+      .csv("s3://coderscotalkingdata/train")
     train.createOrReplaceTempView("train")
 
     val features = spark.sql(
@@ -46,19 +48,36 @@ object app {
     val feature_cols = features.columns.diff(List("is_attributed"))
     println(feature_cols.mkString(","))
     val assembler = new VectorAssembler().setInputCols(feature_cols).setOutputCol("features")
-    val model_input = assembler.transform(features)
+    val full_model_input = assembler.transform(features)
+
+    val model_input = full_model_input.sample(false, 0.01)
+    model_input.rdd.cache()
+
+    println(s"Num lines: ${model_input.count}")
+
+    println(s"Num partitions: ${model_input.rdd.getNumPartitions}")
+
     //val randomForest = new RandomForestClassifier().setLabelCol("is_attributed").setFeaturesCol("features")
-    val gbt = new GBTClassifier().setLabelCol("is_attributed").setFeaturesCol("features")
+    val gbt = new GBTClassifier().setLabelCol("is_attributed").setFeaturesCol("features").setMaxIter(2)
+
+    println("Creating training and test sets")
 
     val Array(training, test) = model_input.randomSplit(Array(0.7, 0.3))
 
+    println("Fitting model")
+
     //val model = randomForest.fit(training)
     val model = gbt.fit(training)
+
+    println("Generating predictions")
+
     val model_output = model.transform(test)
 
     val validator = new BinaryClassificationEvaluator()
       .setMetricName("areaUnderROC")
       .setLabelCol("is_attributed")
+
+    println("Computing AUC")
 
     // Compute AUC
     val auc = validator.evaluate(model_output)
@@ -66,12 +85,16 @@ object app {
 
     model_output.show
 
+    println("Computing confusion matrix")
+
     // Compute confusion matrix
     val predictionsAndLabels = model_output.select("prediction", "is_attributed").rdd
       .map(row => (row(0).asInstanceOf[Double], row(1).asInstanceOf[Int].toDouble))
     val metrics = new MulticlassMetrics(predictionsAndLabels)
 
     println(metrics.confusionMatrix.toString())
+
+    spark.close()
 
   }
 
