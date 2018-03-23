@@ -1,0 +1,25 @@
+{[#: click_id, #: ip, #: app, #: device, #: os, #: channel, @:click_time, @:attr_time, #:is_attr]} : TalkingDataTrain;
+
+\TalkingDataTrain : train := attach [
+  (#)"click_id",
+  (#)"ip",
+  (#)"app",
+  (#)"device",
+  (#)"os",
+  (#)"channel",
+  (@)"click_time",
+  (@)"attr_time",
+  (#)"is_attr"
+] "train_rax";
+
+{[#: click_id, #: ip, #: app, #: device, #: os, #: channel, @:click_time]} : TalkingDataTest;
+
+\TalkingDataTest : test := attach [
+  (#)"click_id",
+  (#)"ip",
+  (#)"app",
+  (#)"device",
+  (#)"os",
+  (#)"channel",
+  (@)"click_time"
+] "test_rax";

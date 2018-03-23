@@ -1,0 +1,90 @@
+%include "attach.rax";
+
+%time on;
+%sql off;
+
+{[
+  #: is_attr, // target var
+  #: ip,
+  #: app,
+  #: device,
+  #: os,
+  #: channel,
+  #: click_hour,          // the hour when the click occured
+  #: no_clicks_hour_ido,  // number of clicks from this ip,os,device combination within the hour
+  #: no_clicks_hour_idoa, // number of clicks from this ip,os,device,app combination within the hour
+  &: ip_freq,             // no clicks from this IP per hour
+  &: app_freq,            // no clicks from this app per hour
+  &: channel_freq         // no clicks from this channel per hour
+]} : Features;
+
+
+// Round the training data set to full hours
+@: rounded_begin := (fold [/min(.click_time)] train) :\ (^)"PT1H";
+train := select [.click_time >= rounded_begin] train;
+
+{[#: is_attr, #: hour_id, #: click_id, #: ip, #: app, #: device, #: os, #: channel, @: click_time]} : 
+train_with_hour_id :=
+  project [
+    .is_attr,
+    .click_time.month_day*24 + .click_time.hour : hour_id,
+    .click_id .. .click_time
+  ] train;
+
+
+@: period_begin := fold [/min(.click_time)] train;
+@: period_end   := fold [/max(.click_time)] train;
+&: total_hours := (&)(period_end ^ period_begin).minutes / 60.0;
+
+// Compute no_clicks_hour_ido
+// (number of clicks from the same ip/device/os combination in the same hour_id
+// For clicks closer than 1 hour to the edges of the data set, extrapolate
+{[#: ip, #: os, #: device, #:hour_id, #:no_clicks_hour_ido]} : no_clicks_hour_ido :=
+  fold [.ip, .os, .device, .hour_id, /count()]
+  train_with_hour_id;
+
+// Compute no_clicks_hour_idoa
+// (number of clicks from the same ip/device/os/app combination in the same hour_id
+{[#: ip, #: os, #: device, #: app, #:hour_id, #:no_clicks_hour_idoa]} : no_clicks_hour_idoa :=
+  fold [.ip, .os, .device, .app, .hour_id, /count()]
+  train_with_hour_id;
+
+
+// Compute frequency of clicks for each IP
+{[#: ip, &:ip_freq]} : ip_freqs :=
+  fold [.ip, (&).cnt / total_hours]
+  fold [.ip, /count():cnt] train;
+
+// Compute frequency of clicks for each app
+{[#: app, &:app_freq]} : app_freqs :=
+  fold [.app, (&).cnt / total_hours]
+  fold [.app, /count():cnt] train;
+
+// Compute frequency of clicks for each channel
+{[#: channel, &:channel_freq]} : channel_freqs :=
+  fold [.channel, (&).cnt / total_hours]
+  fold [.channel, /count():cnt] train;
+
+Features := 
+  project [
+    .is_attr, // target var
+    .ip,
+    .app,
+    .device,
+    .os,
+    .channel,
+    .click_time.hour : click_hour,
+    .no_clicks_hour_ido,
+    .no_clicks_hour_idoa,
+    .ip_freq,
+    .app_freq,
+    .channel_freq
+  ]
+  train_with_hour_id 
+  |><| no_clicks_hour_ido
+  |><| no_clicks_hour_idoa
+  |><| ip_freqs
+  |><| app_freqs
+  |><| channel_freqs;
+
+`persist Features, !"features";

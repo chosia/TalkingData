@@ -1,0 +1,33 @@
+%time on;
+%sql on;
+
+{[#: click_id, #: ip, #: app, #: device, #: os, #: channel, @:click_time, @:attr_time, #:is_attr]} : TalkingDataTrain;
+
+
+\TalkingDataTrain : train := import [
+  (#)"click_id",
+  (#)"ip",
+  (#)"app",
+  (#)"device",
+  (#)"os",
+  (#)"channel",
+  (@)"click_time",
+  (@)"attributed_time",
+  (#)"is_attributed"
+] "train";
+
+`persist train, !"train_rax";
+
+{[#: click_id, #: ip, #: app, #: device, #: os, #: channel, @:click_time]} : TalkingDataTest;
+
+\TalkingDataTest : test := import [
+  (#)"click_id",
+  (#)"ip",
+  (#)"app",
+  (#)"device",
+  (#)"os",
+  (#)"channel",
+  (@)"click_time"
+] "test";
+
+`persist test, !"test_rax";
