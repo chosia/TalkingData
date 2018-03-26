@@ -1,6 +1,6 @@
 {[#: click_id, #: ip, #: app, #: device, #: os, #: channel, @:click_time, @:attr_time, #:is_attr]} : TalkingDataTrain;
 
-\TalkingDataTrain : train := attach [
+\TalkingDataTrain : kaggle_train := attach [
   (#)"click_id",
   (#)"ip",
   (#)"app",
@@ -14,7 +14,7 @@
 
 {[#: click_id, #: ip, #: app, #: device, #: os, #: channel, @:click_time]} : TalkingDataTest;
 
-\TalkingDataTest : test := attach [
+\TalkingDataTest : kaggle_test := attach [
   (#)"click_id",
   (#)"ip",
   (#)"app",

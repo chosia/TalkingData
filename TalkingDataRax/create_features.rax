@@ -1,7 +1,7 @@
 %include "attach.rax";
 
 %time on;
-%sql off;
+%sql on;
 
 {[
   #: is_attr, // target var
@@ -18,73 +18,104 @@
   &: channel_freq         // no clicks from this channel per hour
 ]} : Features;
 
+\Features <- \TalkingDataTrain : CreateFeatures <- {
+
+  {[#: is_attr, #: hour_id, #: click_id, #: ip,
+    #: app, #: device, #: os, #: channel, @: click_time]} : 
+  train_with_hour_id :=
+    project [
+      .is_attr,
+      .click_time.month_day*24 + .click_time.hour : hour_id,
+      .click_id .. .click_time
+    ] in;
+  
+  
+  @: period_begin := fold [/min(.click_time)] in;
+  @: period_end   := fold [/max(.click_time)] in;
+  &: total_hours := (&)(period_end ^ period_begin).minutes / 60.0;
+  
+  // Compute no_clicks_hour_ido
+  // (number of clicks from the same ip/device/os combination in the same hour_id
+  // For clicks closer than 1 hour to the edges of the data set, extrapolate
+  {[#: ip, #: os, #: device, #:hour_id, #:no_clicks_hour_ido]} : no_clicks_hour_ido :=
+    fold [.ip, .os, .device, .hour_id, /count()]
+    train_with_hour_id;
+  
+  // Compute no_clicks_hour_idoa
+  // (number of clicks from the same ip/device/os/app combination in the same hour_id
+  {[#: ip, #: os, #: device, #: app, #:hour_id, #:no_clicks_hour_idoa]} : no_clicks_hour_idoa :=
+    fold [.ip, .os, .device, .app, .hour_id, /count()]
+    train_with_hour_id;
+  
+  
+  // Compute frequency of clicks for each IP
+  {[#: ip, &:ip_freq]} : ip_freqs :=
+    fold [.ip, (&).cnt / total_hours]
+    fold [.ip, /count():cnt] in;
+  
+  // Compute frequency of clicks for each app
+  {[#: app, &:app_freq]} : app_freqs :=
+    fold [.app, (&).cnt / total_hours]
+    fold [.app, /count():cnt] in;
+  
+  // Compute frequency of clicks for each channel
+  {[#: channel, &:channel_freq]} : channel_freqs :=
+    fold [.channel, (&).cnt / total_hours]
+    fold [.channel, /count():cnt] in;
+  
+  out := 
+    project [
+      .is_attr, // target var
+      .ip,
+      .app,
+      .device,
+      .os,
+      .channel,
+      .click_time.hour : click_hour,
+      .no_clicks_hour_ido,
+      .no_clicks_hour_idoa,
+      .ip_freq,
+      .app_freq,
+      .channel_freq
+    ]
+    train_with_hour_id 
+    |><| no_clicks_hour_ido
+    |><| no_clicks_hour_idoa
+    |><| ip_freqs
+    |><| app_freqs
+    |><| channel_freqs;
+};
+
 
 // Round the training data set to full hours
-@: rounded_begin := (fold [/min(.click_time)] train) :\ (^)"PT1H";
-train := select [.click_time >= rounded_begin] train;
+@: rounded_begin := (fold [/min(.click_time)] kaggle_train) :\ (^)"PT1H";
+kaggle_train := select [.click_time >= rounded_begin] kaggle_train;
 
-{[#: is_attr, #: hour_id, #: click_id, #: ip, #: app, #: device, #: os, #: channel, @: click_time]} : 
-train_with_hour_id :=
-  project [
-    .is_attr,
-    .click_time.month_day*24 + .click_time.hour : hour_id,
-    .click_id .. .click_time
-  ] train;
+// Create training test and validation sets
+@:validation_split := (@)"2017-11-08T04:00:00";
+@:test_split := (@)"2017-11-09T04:00:00";
 
+\TalkingDataTrain : Train := 
+  select [.click_time < validation_split] kaggle_train;
 
-@: period_begin := fold [/min(.click_time)] train;
-@: period_end   := fold [/max(.click_time)] train;
-&: total_hours := (&)(period_end ^ period_begin).minutes / 60.0;
+\TalkingDataTrain : Validation :=
+  select [.click_time < test_split] kaggle_train;
 
-// Compute no_clicks_hour_ido
-// (number of clicks from the same ip/device/os combination in the same hour_id
-// For clicks closer than 1 hour to the edges of the data set, extrapolate
-{[#: ip, #: os, #: device, #:hour_id, #:no_clicks_hour_ido]} : no_clicks_hour_ido :=
-  fold [.ip, .os, .device, .hour_id, /count()]
-  train_with_hour_id;
+\TalkingDataTrain : Test :=
+  select [.click_time >= test_split] kaggle_train;
 
-// Compute no_clicks_hour_idoa
-// (number of clicks from the same ip/device/os/app combination in the same hour_id
-{[#: ip, #: os, #: device, #: app, #:hour_id, #:no_clicks_hour_idoa]} : no_clicks_hour_idoa :=
-  fold [.ip, .os, .device, .app, .hour_id, /count()]
-  train_with_hour_id;
+`print "Creating the train set";
+\Features : Features_Train := CreateFeatures(Train);
+`persist Train, !"Features_Train";
 
+`print "Creating the validation set";
+\Features : Features_Validation := CreateFeatures(Validation);
+`persist Validation, !"Features_Validation";
 
-// Compute frequency of clicks for each IP
-{[#: ip, &:ip_freq]} : ip_freqs :=
-  fold [.ip, (&).cnt / total_hours]
-  fold [.ip, /count():cnt] train;
+`print "Creating the test set";
+\Features : Features_Test := CreateFeatures(Test);
+`persist Test, !"Features_Test";
 
-// Compute frequency of clicks for each app
-{[#: app, &:app_freq]} : app_freqs :=
-  fold [.app, (&).cnt / total_hours]
-  fold [.app, /count():cnt] train;
-
-// Compute frequency of clicks for each channel
-{[#: channel, &:channel_freq]} : channel_freqs :=
-  fold [.channel, (&).cnt / total_hours]
-  fold [.channel, /count():cnt] train;
-
-Features := 
-  project [
-    .is_attr, // target var
-    .ip,
-    .app,
-    .device,
-    .os,
-    .channel,
-    .click_time.hour : click_hour,
-    .no_clicks_hour_ido,
-    .no_clicks_hour_idoa,
-    .ip_freq,
-    .app_freq,
-    .channel_freq
-  ]
-  train_with_hour_id 
-  |><| no_clicks_hour_ido
-  |><| no_clicks_hour_idoa
-  |><| ip_freqs
-  |><| app_freqs
-  |><| channel_freqs;
-
-`persist Features, !"features";
+%sql $ "copy into 's3://coderscotalkingdata/features_train/' from features_train credentials = (AWS_KEY_ID='xxx' AWS_SECRET_KEY='xxx') file_format = ( type = 'csv' compression = NONE) overwrite = true";
+%sql $ "copy into 's3://coderscotalkingdata/features_validation/' from features_validation credentials = (AWS_KEY_ID='xxx' AWS_SECRET_KEY='xxx') file_format = ( type = 'csv' compression = NONE) overwrite = true";
+%sql $ "copy into 's3://coderscotalkingdata/features_test/' from features_test credentials = (AWS_KEY_ID='xxx' AWS_SECRET_KEY='xxx') file_format = ( type = 'csv' compression = NONE) overwrite = true";
